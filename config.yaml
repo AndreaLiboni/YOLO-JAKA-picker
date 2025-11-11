@@ -22,3 +22,4 @@ jaka:
 # camera config
 camera:
   index: 2
+  work_area_size: [420, 220] # mm

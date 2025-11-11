@@ -52,6 +52,7 @@ class CameraApp(QMainWindow):
         self.squares_y = 8  # vertical squares
         self.square_length = 15
         self.marker_length = 11
+        self.work_area_size = self.CONFIGS['camera']['work_area_size']  # in mm
 
         
         # Create Charuco board
@@ -301,6 +302,7 @@ class CameraApp(QMainWindow):
 
         return frame
     
+
     def rectify_perspective(
         self,
         frame,
@@ -308,8 +310,8 @@ class CameraApp(QMainWindow):
     ):
         cols = self.squares_x
         rows = self.squares_y
-        board_width = self.square_length * cols
-        board_height = self.square_length * rows
+        board_width = self.square_length * cols + self.work_area_size[0]
+        board_height = self.square_length * rows + self.work_area_size[1]
 
         # Coordinate dei 4 angoli della board nel mondo (Z=0)
         obj_pts = np.array([
@@ -390,17 +392,12 @@ class CameraApp(QMainWindow):
         # return the resized image
         return resized
 
-        
+    
     def update_frame(self):
         # start = time.time()
         if self.camera and self.camera.isOpened():
             ret, frame = self.camera.read()
             if ret:
-                # detection
-                boxes_detection = None
-                if self.yolo is not None:
-                    boxes_detection = self.yolo.forward(frame.copy())
-
                 self.current_frame = frame.copy()
 
                 if self.is_calibrated and self.show_undistorted:
@@ -450,6 +447,10 @@ class CameraApp(QMainWindow):
                             
                             else:
                                 frame = self.draw_bbox(frame)
+                # detection
+                boxes_detection = None
+                if self.yolo is not None:
+                    boxes_detection = self.yolo.forward(frame.copy())
                 
 
                 if boxes_detection is not None:
@@ -462,7 +463,7 @@ class CameraApp(QMainWindow):
                         self.points_detection.append((real_x, real_y))
 
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        cv2.putText(frame, f'{self.classes[cl]} dist: {dist}mm ({real_x}, {real_y})', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (36,255,12), 2)
+                        cv2.putText(frame, f'{self.classes[cl]} dist: {dist}mm ({real_x}, {real_y})', (x1, y2 + 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (36,255,12), 2)
 
 
 
