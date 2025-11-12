@@ -85,11 +85,10 @@ class CameraApp(QMainWindow):
         self.points_detection = []
         self.classes = self.CONFIGS['model']['classes']
 
-        self.is_picking_enabled = False
+        self.is_picking = False
         
         self.init_ui()
         self.init_camera()
-        self.start_camera()
 
         try:
             self.load_calibration()
@@ -118,25 +117,9 @@ class CameraApp(QMainWindow):
         self.interactive_label.clicked.connect(self.on_point_clicked)
         interactive_layout.addWidget(self.interactive_label)
         
-        # Status label for Charuco detection
-        self.charuco_status = QLabel("Charuco Status: Not detected")
-        self.charuco_status.setStyleSheet("color: red; font-weight: bold;")
-        interactive_layout.addWidget(self.charuco_status)
-        
         # Controls frame
         controls_frame = QGroupBox()
         controls_layout = QVBoxLayout(controls_frame)
-        
-        # Camera control buttons
-        camera_button_layout = QHBoxLayout()
-        self.start_btn = QPushButton("Start Camera")
-        self.stop_btn = QPushButton("Stop Camera")
-        
-        self.start_btn.clicked.connect(self.start_camera)
-        self.stop_btn.clicked.connect(self.stop_camera)
-        
-        camera_button_layout.addWidget(self.start_btn)
-        camera_button_layout.addWidget(self.stop_btn)
         
         # Calibration control buttons
         calib_button_layout = QHBoxLayout()
@@ -154,22 +137,33 @@ class CameraApp(QMainWindow):
         calib_button_layout.addWidget(self.calibrate_btn)
         calib_button_layout.addWidget(self.reset_calib_btn)
         calib_button_layout.addWidget(self.load_calib_btn)
+
+        # robot picking button
+        picking_button_layout = QHBoxLayout()
+        self.start_picking_btn = QPushButton("Start Picking")
+        self.stop_picking_btn = QPushButton("Stop Picking")
+
+        self.start_picking_btn.clicked.connect(self.move_robot)
+        self.stop_picking_btn.clicked.connect(self.stop_picking)
+
+        picking_button_layout.addWidget(self.start_picking_btn)
+        picking_button_layout.addWidget(self.stop_picking_btn)
         
         # Undistortion toggle
         self.undistort_checkbox = QCheckBox("Show Undistorted Image")
         self.undistort_checkbox.toggled.connect(self.toggle_undistortion)
 
         # Crop toggle
-        self.crop_checkbox = QCheckBox("Crop Image")
+        self.crop_checkbox = QCheckBox("Crop to working area")
         self.crop_checkbox.toggled.connect(self.toggle_crop)
+
+        # Lock charuco
+        self.lock_charuco_checkbox = QCheckBox("Lock Charuco Position")
+        self.lock_charuco_checkbox.toggled.connect(self.toggle_lock_charuco)
 
         # Enable detection
         self.enable_detection_checkbox = QCheckBox("Enable Detection")
         self.enable_detection_checkbox.toggled.connect(self.toggle_detection)
-
-        # Start picking
-        self.enable_picking_checkbox = QCheckBox("Enable Picking (will use the robot)")
-        self.enable_picking_checkbox.toggled.connect(self.toggle_picking)
         
         # Point selection controls
         point_button_layout = QHBoxLayout()
@@ -183,12 +177,12 @@ class CameraApp(QMainWindow):
         self.points_list.setMaximumHeight(300)
         
         # Add all controls to layout
-        controls_layout.addLayout(camera_button_layout)
         controls_layout.addLayout(calib_button_layout)
+        controls_layout.addLayout(picking_button_layout)
         controls_layout.addWidget(self.undistort_checkbox)
         controls_layout.addWidget(self.crop_checkbox)
+        controls_layout.addWidget(self.lock_charuco_checkbox)
         controls_layout.addWidget(self.enable_detection_checkbox)
-        controls_layout.addWidget(self.enable_picking_checkbox)
         controls_layout.addWidget(QLabel(f"Calibration Frames Captured: 0"))
         self.frames_label = controls_layout.itemAt(controls_layout.count()-1).widget()
         controls_layout.addWidget(self.points_label)
@@ -203,8 +197,6 @@ class CameraApp(QMainWindow):
         main_layout.addWidget(controls_frame, 1)
         
         # Set initial button states
-        self.stop_btn.setEnabled(False)
-        self.capture_btn.setEnabled(False)
         self.calibrate_btn.setEnabled(self.img_folder is not None)
         self.undistort_checkbox.setEnabled(False)
         
@@ -234,6 +226,21 @@ class CameraApp(QMainWindow):
             self.camera.set(cv2.CAP_PROP_FPS, 30)
             self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
 
+            # focus
+            if self.CONFIGS['camera']['focus'] is None:
+                self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+            else:
+                self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+                self.camera.set(cv2.CAP_PROP_FOCUS, self.CONFIGS['camera']['focus']) # min: 0, max: 255, increment:5
+
+            # exposure
+            if self.CONFIGS['camera']['exposure'] is None:
+                self.camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+            else:
+                self.camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) # manual mode: 1, auto mode: 3
+                self.camera.set(cv2.CAP_PROP_EXPOSURE, self.CONFIGS['camera']['exposure']) # min: -13, max: -1
+            
+
 
             self.frame_size = (
                 int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH)),
@@ -246,30 +253,12 @@ class CameraApp(QMainWindow):
                 1280, 
                 int((1280 * self.frame_size[1]) / self.frame_size[0]) if self.frame_size[0] > 0 else 480
             )
-            
-        except Exception as e:
-            QMessageBox.warning(self, "Camera Error", f"Failed to initialize camera: {str(e)}")
-            
-    def start_camera(self):
-        """Start camera streaming"""
-        if self.camera and self.camera.isOpened():
+
             self.timer.timeout.connect(self.update_frame)
             self.timer.start(30)  # Update every 30ms (~33 FPS)
             
-            self.start_btn.setEnabled(False)
-            self.stop_btn.setEnabled(True)
-            self.capture_btn.setEnabled(True)
-        else:
-            QMessageBox.warning(self, "Camera Error", "Camera not available")
-            
-    def stop_camera(self):
-        """Stop camera streaming"""
-        self.timer.stop()
-        self.timer.timeout.disconnect()
-        
-        self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
-        self.capture_btn.setEnabled(False)
+        except Exception as e:
+            QMessageBox.warning(self, "Camera Error", f"Failed to initialize camera: {str(e)}")
     
     def draw_bbox(self, frame):
         cols = self.squares_x
@@ -404,52 +393,54 @@ class CameraApp(QMainWindow):
                     # Apply undistortion if calibrated and enabled
                     frame = cv2.undistort(frame, self.camera_matrix, self.distortion)
                 
-                marker_corners, marker_ids, _ = cv2.aruco.detectMarkers(frame, self.aruco_dict, parameters=self.charuco_params)
+                # Charuco detection and pose estimation
+                if not self.lock_charuco_checkbox.isChecked():
+                    marker_corners, marker_ids, _ = cv2.aruco.detectMarkers(frame, self.aruco_dict, parameters=self.charuco_params)
 
-                if marker_ids is not None and len(marker_ids) > 0:
-                    # Interpolate CharUco corners
-                    charuco_retval, charuco_corners, charuco_ids = cv2.aruco.interpolateCornersCharuco(marker_corners, marker_ids, frame, self.charuco_board)
+                    if marker_ids is not None and len(marker_ids) > 0:
+                        # Interpolate CharUco corners
+                        charuco_retval, charuco_corners, charuco_ids = cv2.aruco.interpolateCornersCharuco(marker_corners, marker_ids, frame, self.charuco_board)
 
-                    # If enough corners are found, estimate the pose
-                    if charuco_retval and len(charuco_corners) > 6:
-                        retval, rvec, tvec = cv2.aruco.estimatePoseCharucoBoard(charuco_corners, charuco_ids, self.charuco_board, self.camera_matrix, self.distortion, None, None)
+                        # If enough corners are found, estimate the pose
+                        if charuco_retval and len(charuco_corners) > 6:
+                            retval, rvec, tvec = cv2.aruco.estimatePoseCharucoBoard(charuco_corners, charuco_ids, self.charuco_board, self.camera_matrix, self.distortion, None, None)
 
-                        # If pose estimation is successful, draw the axis
-                        if retval:
-                            self.rvec = rvec
-                            self.tvec = tvec
+                            # If pose estimation is successful, draw the axis
+                            if retval:
+                                self.rvec = rvec
+                                self.tvec = tvec
 
-                            cv2.drawFrameAxes(frame, self.camera_matrix, self.distortion, rvec, tvec, length=50, thickness=2)
+                                cv2.drawFrameAxes(frame, self.camera_matrix, self.distortion, rvec, tvec, length=50, thickness=2)
 
-                            # origin_index = marker_ids.tolist().index(min(marker_ids))
-                            # self.origin = (int(marker_corners[origin_index][0][0][0]), int(marker_corners[origin_index][0][0][1]))
-                            self.origin, _ = cv2.projectPoints(np.array([[0,0,0]], dtype=np.float32), self.rvec, self.tvec, self.camera_matrix, self.distortion)
-                            self.origin = (int(self.origin[0][0][0]), int(self.origin[0][0][1]))
-
-                            if self.is_calibrated and self.show_cropped:
-                                frame, H = self.rectify_perspective(frame, output_width=self.interactive_label.width())
-                                self.H = H
-                                frame = self.image_resize(frame, height=self.interactive_label.height())
-                                if self.new_frame_size != frame.shape[:2]:
-                                    self.new_frame_size = frame.shape[:2]
-                                    self.interactive_label.setFixedSize(
-                                        frame.shape[1],
-                                        self.interactive_label.height()
-                                    )
-                                
-
-                                self.origin = cv2.perspectiveTransform(np.array([[[self.origin[0], self.origin[1]]]], dtype=np.float32), H)[0][0]
-                                self.origin = (int(self.origin[0]), int(self.origin[1]))
-                                
-                                # marker_corners, marker_ids, _ = cv2.aruco.detectMarkers(frame_no_origin, self.aruco_dict, parameters=self.charuco_params)
                                 # origin_index = marker_ids.tolist().index(min(marker_ids))
                                 # self.origin = (int(marker_corners[origin_index][0][0][0]), int(marker_corners[origin_index][0][0][1]))
-                            
-                            else:
-                                frame = self.draw_bbox(frame)
+                                self.origin, _ = cv2.projectPoints(np.array([[0,0,0]], dtype=np.float32), self.rvec, self.tvec, self.camera_matrix, self.distortion)
+                                self.origin = (int(self.origin[0][0][0]), int(self.origin[0][0][1]))
+
+                # Perspective rectification
+                if self.is_calibrated and self.show_cropped:
+                    frame, H = self.rectify_perspective(frame, output_width=self.interactive_label.width())
+                    self.H = H
+                    frame = self.image_resize(frame, height=self.interactive_label.height())
+                    if self.new_frame_size != frame.shape[:2]:
+                        self.new_frame_size = frame.shape[:2]
+                        self.interactive_label.setFixedSize(
+                            frame.shape[1],
+                            self.interactive_label.height()
+                        )
+                    
+
+                    self.origin = cv2.perspectiveTransform(np.array([[[self.origin[0], self.origin[1]]]], dtype=np.float32), H)[0][0]
+                    self.origin = (int(self.origin[0]), int(self.origin[1]))
+                    
+                    # marker_corners, marker_ids, _ = cv2.aruco.detectMarkers(frame_no_origin, self.aruco_dict, parameters=self.charuco_params)
+                    # origin_index = marker_ids.tolist().index(min(marker_ids))
+                    # self.origin = (int(marker_corners[origin_index][0][0][0]), int(marker_corners[origin_index][0][0][1]))
+                
                 # detection
                 boxes_detection = None
                 if self.yolo is not None:
+                    # cv2.imwrite("temp_frame.jpg", frame)
                     boxes_detection = self.yolo.forward(frame.copy())
                 
 
@@ -463,10 +454,7 @@ class CameraApp(QMainWindow):
                         self.points_detection.append((real_x, real_y))
 
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        cv2.putText(frame, f'{self.classes[cl]} dist: {dist}mm ({real_x}, {real_y})', (x1, y2 + 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (36,255,12), 2)
-
-
-
+                        cv2.putText(frame, f'{self.classes[cl]} dist: {dist}mm ({real_x}, {real_y})', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (36,255,12), 2)
 
                 display_frame = frame.copy()
                 
@@ -650,7 +638,13 @@ class CameraApp(QMainWindow):
 
         self.camera_matrix = np.array(json_data['mtx'])
         self.distortion = np.array(json_data['dist'])
-    
+
+        if 'rvec' in json_data:
+            self.rvec = np.array(json_data['rvec']).reshape((3,1))
+            self.tvec = np.array(json_data['tvec']).reshape((3,1))
+            self.origin = tuple(json_data['origin'])
+            self.lock_charuco_checkbox.setChecked(True)
+        
         self.is_calibrated = True
         self.undistort_checkbox.setEnabled(True)
 
@@ -676,6 +670,31 @@ class CameraApp(QMainWindow):
         elif not checked:
             self.yolo = None
             self.points_detection.clear()
+    
+    def toggle_lock_charuco(self, checked):
+        OUTPUT_JSON = 'calibration.json'
+        if checked:
+            # add rvec and tvec to the calibration.json
+            with open(OUTPUT_JSON, 'r') as json_file:
+                data = json.load(json_file)
+            data['rvec'] = self.rvec.flatten().tolist()
+            data['tvec'] = self.tvec.flatten().tolist()
+            data['origin'] = self.origin
+            with open(OUTPUT_JSON, 'w') as json_file:
+                json.dump(data, json_file, indent=4)
+        else:
+            # remove rvec and tvec from the calibration.json
+            with open(OUTPUT_JSON, 'r') as json_file:
+                data = json.load(json_file)
+            if 'rvec' in data:
+                del data['rvec']
+            if 'tvec' in data:
+                del data['tvec']
+            if 'origin' in data:
+                del data['origin']
+            with open(OUTPUT_JSON, 'w') as json_file:
+                json.dump(data, json_file, indent=4)
+
 
 
     def draw_points_on_image(self, pixmap):
@@ -738,15 +757,15 @@ class CameraApp(QMainWindow):
         self.points.clear()
         self.points_list.clear()
     
-    def toggle_picking(self, checked):
-        self.is_picking_enabled = checked
-        if checked:
-            self.move_robot()
+    def stop_picking(self):
+        self.is_picking = False
     
     def move_robot(self):
         if len(self.points_detection) == 0:
-            QMessageBox.warning(self, "No Points", "No points selected for picking.")
+            QMessageBox.warning(self, "No Objects", "No objects detected for picking.")
             return
+        
+        self.is_picking = True
 
         self.stop_camera()
         
@@ -827,7 +846,7 @@ class CameraApp(QMainWindow):
                 3.14
             ]
             print(f"Moving to point: x={x} mm, y={y} mm")
-            if not self.is_picking_enabled:
+            if not self.is_picking:
                 break
             res = robot.linear_move(target_pos, 0, True, speed)
 
@@ -842,7 +861,7 @@ class CameraApp(QMainWindow):
                 force = abs(robot.get_torque_sensor_data(1)[1][2][2])
                 if force > max_force:
                     max_force = force
-                if max_force >= pick_force or not self.is_picking_enabled:
+                if max_force >= pick_force or not self.is_picking:
                     robot.motion_abort()
                     break
                 current_time = time.time()
@@ -851,7 +870,7 @@ class CameraApp(QMainWindow):
                     print("Timeout reached while picking, aborting.")
                     start_time = current_time
                 
-            if not self.is_picking_enabled:
+            if not self.is_picking:
                 break
             print("Picked object with force: ", max_force)
             robot.set_digital_output(0, digital_output_index, 1)
