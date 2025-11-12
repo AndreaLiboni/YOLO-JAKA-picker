@@ -116,11 +116,14 @@ class CameraApp(QMainWindow):
         self.interactive_label.setText("Please start the camera")
         self.interactive_label.clicked.connect(self.on_point_clicked)
         interactive_layout.addWidget(self.interactive_label)
+        # self.input_exposure = QLineEdit()
+        # self.input_exposure.setPlaceholderText("Set Exposure Value")
+        # self.input_exposure.editingFinished.connect(self.set_exposure)
         
         # Controls frame
         controls_frame = QGroupBox()
         controls_layout = QVBoxLayout(controls_frame)
-        
+
         # Calibration control buttons
         calib_button_layout = QHBoxLayout()
         self.capture_btn = QPushButton("Capture Calibration Frame")
@@ -137,6 +140,7 @@ class CameraApp(QMainWindow):
         calib_button_layout.addWidget(self.calibrate_btn)
         calib_button_layout.addWidget(self.reset_calib_btn)
         calib_button_layout.addWidget(self.load_calib_btn)
+        # calib_button_layout.addWidget(self.input_exposure)
 
         # robot picking button
         picking_button_layout = QHBoxLayout()
@@ -199,6 +203,14 @@ class CameraApp(QMainWindow):
         # Set initial button states
         self.calibrate_btn.setEnabled(self.img_folder is not None)
         self.undistort_checkbox.setEnabled(False)
+    
+    # def set_exposure(self):
+    #     if not self.camera:
+    #         return
+    #     print("Setting exposure to:", self.input_exposure.text())
+    #     self.camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) # manual mode
+    #     exposure_value = float(self.input_exposure.text())
+    #     self.camera.set(cv2.CAP_PROP_GAIN, exposure_value)
         
     def init_camera(self):
         """Initialize camera connection"""
@@ -238,7 +250,7 @@ class CameraApp(QMainWindow):
                 self.camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
             else:
                 self.camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) # manual mode: 1, auto mode: 3
-                self.camera.set(cv2.CAP_PROP_EXPOSURE, self.CONFIGS['camera']['exposure']) # min: -13, max: -1
+                self.camera.set(cv2.CAP_PROP_GAIN, self.CONFIGS['camera']['exposure']) # min: -13, max: -1
             
 
 
@@ -428,14 +440,12 @@ class CameraApp(QMainWindow):
                             frame.shape[1],
                             self.interactive_label.height()
                         )
-                    
+                    if self.lock_charuco_checkbox.isChecked():
+                        self.origin, _ = cv2.projectPoints(np.array([[0,0,0]], dtype=np.float32), self.rvec, self.tvec, self.camera_matrix, self.distortion)
+                        self.origin = (int(self.origin[0][0][0]), int(self.origin[0][0][1]))
 
                     self.origin = cv2.perspectiveTransform(np.array([[[self.origin[0], self.origin[1]]]], dtype=np.float32), H)[0][0]
                     self.origin = (int(self.origin[0]), int(self.origin[1]))
-                    
-                    # marker_corners, marker_ids, _ = cv2.aruco.detectMarkers(frame_no_origin, self.aruco_dict, parameters=self.charuco_params)
-                    # origin_index = marker_ids.tolist().index(min(marker_ids))
-                    # self.origin = (int(marker_corners[origin_index][0][0][0]), int(marker_corners[origin_index][0][0][1]))
                 
                 # detection
                 boxes_detection = None
@@ -451,7 +461,7 @@ class CameraApp(QMainWindow):
 
                         real_x, real_y = map(round, self.img_to_realworld((x1 + x2)//2, (y1 + y2)//2))
                         dist = round(np.sqrt(real_x**2 + real_y**2))
-                        self.points_detection.append((real_x, real_y))
+                        self.points_detection.append((real_x, real_y, cl))
 
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                         cv2.putText(frame, f'{self.classes[cl]} dist: {dist}mm ({real_x}, {real_y})', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (36,255,12), 2)
@@ -659,6 +669,7 @@ class CameraApp(QMainWindow):
                 self.frame_size[0],
                 self.interactive_label.height()
             )
+            self.load_calibration()
     
     def toggle_detection(self, checked):
         if checked and self.yolo is None:
@@ -707,7 +718,7 @@ class CameraApp(QMainWindow):
         painter.drawEllipse(self.origin[0], self.origin[1], 8, 8)
         painter.drawText(self.origin[0] + 10, self.origin[1] - 10, '0')
 
-        for i, (x, y) in enumerate(self.points + self.points_detection):
+        for i, (x, y, _) in enumerate(self.points + self.points_detection):
             # dist_x = abs(self.meter_to_pixel(x))
             # dist_y = abs(self.meter_to_pixel(y)
             
@@ -745,7 +756,8 @@ class CameraApp(QMainWindow):
             dist = np.sqrt(real_x**2 + real_y**2)
             self.points.append((
                 real_x,
-                real_y
+                real_y,
+                -1
             ))
             dist_text = f"Distance between point {len(self.points)} and origin: {dist:.2f} pixels, or {self.pixel_to_meter(dist):.2f} mm\n"
             dist_text += f"x: {self.points[-1][0]:.2f} mm, y: {self.points[-1][1]:.2f} mm\n---------------------------------"
@@ -761,13 +773,13 @@ class CameraApp(QMainWindow):
         self.is_picking = False
     
     def move_robot(self):
-        if len(self.points_detection) == 0:
-            QMessageBox.warning(self, "No Objects", "No objects detected for picking.")
-            return
+        # if len(self.points_detection) == 0:
+        #     QMessageBox.warning(self, "No Objects", "No objects detected for picking.")
+        #     return
         
         self.is_picking = True
 
-        self.stop_camera()
+        obj_points = self.points_detection.copy()
         
         start_pose = self.CONFIGS['jaka']['start_pose']
         speed = self.CONFIGS['jaka']['speed']
@@ -778,7 +790,7 @@ class CameraApp(QMainWindow):
         object_height = self.CONFIGS['jaka']['object_height']
         pick_force = self.CONFIGS['jaka']['pick_force']
         digital_output_index = self.CONFIGS['jaka']['digital_output_index']
-        drop_position = self.CONFIGS['jaka']['drop_position']
+        drop_positions = self.CONFIGS['jaka']['drop_positions']
         
         robot = RC(
             self.CONFIGS['jaka']['ip_address']
@@ -825,18 +837,17 @@ class CameraApp(QMainWindow):
         # print("Homing done.")
         
         # Move to charuko origin
-        # res = robot.linear_move([0,0,20,rot_x, rot_y,3.14], 0, True, speed)[0]
+        # res = robot.linear_move([0,0,0,rot_x, rot_y,3.14], 0, True, speed)[0]
         # print("Moved to start pose." + str(res))
         # if res != 0 and res != -12:
         #     print("Failed to move to start pose, aborting.")
         #     robot.logout()
         #     QMessageBox.warning(self, "Robot error", "Linear move errro" + str(res))
         #     return
-        # return
         
 
         Z = object_height
-        for x,y in self.points_detection:
+        for x,y, cl in obj_points:
             target_pos = [
                 y,
                 x,
@@ -876,6 +887,8 @@ class CameraApp(QMainWindow):
             robot.set_digital_output(0, digital_output_index, 1)
 
             robot.linear_move([0,0, offset_z, 0, 0, 0], 1, True, 20)
+
+            drop_position = drop_positions[cl]
             robot.linear_move(drop_position, 0, True, speed)
 
             robot.set_digital_output(0, digital_output_index, 0)

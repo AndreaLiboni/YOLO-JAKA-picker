@@ -1,7 +1,7 @@
 # yolo config
 model:
   model_path: './best.pt'
-  classes: ['front', 'back']
+  classes: ['front', 'back', 'white']
   device: 'cuda:0' # 'cpu' or 'cuda:0'
   confidence_threshold: 0.9
 
@@ -10,18 +10,22 @@ jaka:
   ip_address: '192.168.0.75'
   start_pose: [-1.57, 1.57, -1.57, 1.57, -4.71, 0] # joints
   # start_pose: [0.0, 1.57, -1.57, 0.0, -1.57, 0.0]
-  speed: 150 # mm/s ONLY FOR LINEAR MOVEMENT
+  speed: 200 # mm/s ONLY FOR LINEAR MOVEMENT
   coordinate_system_index: 8
   tcp_index: 9
   tcp_rotation_xy: [0, 3.14159] # rad
-  object_height: 20 # mm
+  object_height: 10 # mm
   pick_force: 1 # N
   digital_output_index: 7
-  drop_position: [233, 745, 78, 0, 3.14159, 3.14159] # in the charuko coordinate system
+  drop_positions: [ # in the charuko coordinate system, one for each class
+    [520, 510, 78, 0, 3.14159, 3.14159],
+    [520, 274, 78, 0, 3.14159, 3.14159],
+    [520, 0, 78, 0, 3.14159, 3.14159]
+  ]
 
 # camera config
 camera:
   index: 2
-  work_area_size: [420, 220] # mm
+  work_area_size: [400, 250] # mm
   focus: 20 # min: 0, max: 255, increment:5 -> null to enable auto
-  exposure: -1 #  null to enable auto
+  exposure:  # min:0, max: 232 -> null to enable auto

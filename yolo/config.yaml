@@ -1,0 +1,14 @@
+DATA:
+    YAML_FILE: "./datasets/data.yaml"
+    OUTPUT_FOLDER: "./yolo_output"
+
+MODEL:
+    MODEL_PATH: yolo11n.pt
+
+TRAIN:
+    EPOCHS: 100
+    IMG_SIZE: 
+
+MISC:
+    DEVICE: 'cuda'
+

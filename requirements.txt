@@ -1,6 +1,7 @@
 # Python 3.13
 # Jaka SDK 2.2.7
 PyQt5==5.15.11
-opencv-python-headless==4.11.0.86
-opencv-contrib-python-headless==4.11.0.86
-ultralytics==8.3.201
+opencv-python-headless==4.12.0.88
+opencv-contrib-python-headless==4.12.0.88
+ultralytics==8.3.222
+numpy==2.2.6
