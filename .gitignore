@@ -2,3 +2,8 @@ venv
 __pycache__/
 calibration_images/
 calibration.json
+*.pt
+data
+datasets
+yolo_output
+runs

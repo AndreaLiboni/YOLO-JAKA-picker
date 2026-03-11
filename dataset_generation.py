@@ -5,6 +5,7 @@ import numpy as np
 from shutil import copyfile
 from pathlib import Path
 import xml.etree.ElementTree as ET
+from PIL import Image
 
 def crop_transparent(img):
     # Find all non-transparent pixels
@@ -63,12 +64,13 @@ def is_overlapping(new_box, existing_boxes, threshold=0.25):
 
 def place_images_on_background(background_size, num_images, image_folder, output_image, output_labels, background, classes, img_dim=0.1, brightness_variation=0):
     # open background image and resize it
-    background_img = cv2.imread(background, cv2.IMREAD_UNCHANGED)
-    background_img = cv2.resize(background_img, (background_size[0], background_size[1]))
+    background_img = Image.open(background)
+    background = background_img.resize(background_size)
     #convert to rgba to use it as background
-    background_rgb = cv2.cvtColor(background_img, cv2.COLOR_BGR2BGRA)
+    # background_rgb = cv2.cvtColor(background_img, cv2.COLOR_BGR2BGRA) # COLOR_BGR2BGRA
 
-    background = np.full((background_size[1], background_size[0], 4), background_rgb, dtype=np.uint8)
+    #background_rgb = background_img
+    # background = background_rgb.copy()
     
     # Get list of images
     images = [img for img in os.listdir(image_folder) if img.endswith('.png')]
@@ -79,8 +81,7 @@ def place_images_on_background(background_size, num_images, image_folder, output
         img_name = random.choice(images)
         img_path = os.path.join(image_folder, img_name)
         # CLASS
-        class_name = img_name.split('_')[1].split('.')[0]
-        class_name = classes[class_name]
+        class_name = img_name[6:].split('_')[0]
         img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
         # adjust brightness, not alpha
         if brightness_variation > 0:
@@ -115,18 +116,21 @@ def place_images_on_background(background_size, num_images, image_folder, output
         placed_boxes = [box for box in placed_boxes if not is_overlapping(new_box, [box])]
         placed_boxes.append(new_box)
         
-        alpha_s = img[:, :, 3] / 255.0
-        alpha_l = 1.0 - alpha_s
-        for c in range(3):
-            background[y_offset:y_offset+height, x_offset:x_offset+width, c] = (
-                alpha_s * img[:, :, c] + alpha_l * background[y_offset:y_offset+height, x_offset:x_offset+width, c]
-            )
-        background[y_offset:y_offset+height, x_offset:x_offset+width, 3] = img[:, :, 3]
+        # alpha_s = img[:, :, 3] / 255.0
+        # alpha_l = 1.0 - alpha_s
+        # for c in range(3):
+        #     background[y_offset:y_offset+height, x_offset:x_offset+width, c] = (
+        #         alpha_s * img[:, :, c] + alpha_l * background[y_offset:y_offset+height, x_offset:x_offset+width, c]
+        #     )
+        # background[y_offset:y_offset+height, x_offset:x_offset+width, 3] = img[:, :, 3]
+        img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
+        background.paste(Image.fromarray(img), (x_offset, y_offset), Image.fromarray(img))
     
     final_boxes = []
         
     # Save final image and labels
-    cv2.imwrite(output_image, background, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+    # cv2.imwrite(output_image, background, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+    background.save(output_image, quality=95)
     with open(output_labels, 'w') as f:
         for box in placed_boxes:
             cl, x1, y1, x2, y2 = box
@@ -212,7 +216,7 @@ def parse_cvat_annotations(cvat_root, classes):
             ])
     return images
 
-def generate_yolo_dataset(output_dir, num_images, train_img_folder, background_folder, classes, val_img_folder=None):
+def generate_yolo_dataset(output_dir, num_images, train_img_folder, background_folder, classes, val_img_folder=None, images_per_background=[1, 2, 3, 4, 5, 8, 10], img_dim=1.0, brightness_variation=0.0):
     os.makedirs(output_dir, exist_ok=True)
     images_dir = os.path.join(output_dir, "images")
     labels_dir = os.path.join(output_dir, "labels")
@@ -226,7 +230,9 @@ def generate_yolo_dataset(output_dir, num_images, train_img_folder, background_f
     os.makedirs(labels_dir, exist_ok=True)
 
     train_split = int(num_images * 1)
+    
     background_path = [img for img in os.listdir(background_folder) if img.endswith('.png') or img.endswith('.jpg') or img.endswith('.jpeg')]
+    
 
     for i in range(num_images):
         img_filename = f"{i+1}.jpg"
@@ -235,17 +241,19 @@ def generate_yolo_dataset(output_dir, num_images, train_img_folder, background_f
         background_image_path = os.path.join(background_folder, random.choice(background_path))
         # get background size
         img = cv2.imread(background_image_path)
+
+        print(img.shape)
         
         place_images_on_background(
             background_size=(img.shape[1], img.shape[0]),
-            num_images=random.choice([1, 2, 3, 4, 5, 8, 10]),
-            img_dim=1, # random.uniform(0.22, 0.18),
+            num_images=random.choice(images_per_background),
+            img_dim=img_dim,
             background=background_image_path,
             image_folder=train_img_folder,
             output_image=os.path.join(images_dir, subset, img_filename),
             classes=classes,
             output_labels=os.path.join(labels_dir, subset, label_filename),
-            brightness_variation=0,
+            brightness_variation=brightness_variation,
         )
     
     # if validation folder is provided, parse CVAT annotations
@@ -281,14 +289,14 @@ def generate_yolo_dataset(output_dir, num_images, train_img_folder, background_f
                 
                 place_images_on_background(
                     background_size=(img.shape[1], img.shape[0]),
-                    num_images=random.choice([1, 2, 3, 4, 5, 8, 10]),
-                    img_dim=1, # random.uniform(0.22, 0.18),
+                    num_images=random.choice(images_per_background),
+                    img_dim=img_dim,
                     background=background_image_path,
                     image_folder=train_img_folder,
                     output_image=os.path.join(images_dir, subset, img_filename),
                     classes=classes,
                     output_labels=os.path.join(labels_dir, subset, label_filename),
-                    brightness_variation=0,
+                    brightness_variation=brightness_variation,
                 )
     
     # Create the data.yaml file
@@ -300,12 +308,12 @@ def generate_yolo_dataset(output_dir, num_images, train_img_folder, background_f
     
     print(f"YOLO dataset with {num_images} images generated in {output_dir}")
 
-def extract_object_from_background(img, background):
+def extract_object_from_background(img, background, threshold=30):
     diff = cv2.absdiff(img, background)
     # Add transparency channel if pixel is 0 in diff
     mask = []
     for c in range(3):
-        _, channel_mask = cv2.threshold(diff[:, :, c], 30, 255, cv2.THRESH_BINARY)
+        _, channel_mask = cv2.threshold(diff[:, :, c], threshold, 255, cv2.THRESH_BINARY)
         mask.append(channel_mask)
     combined_mask = cv2.bitwise_or(mask[0], cv2.bitwise_or(mask[1], mask[2]))
     alpha_channel = combined_mask
@@ -316,14 +324,14 @@ def extract_object_from_background(img, background):
     extracted = crop_transparent(dst)
     return extracted
 
-def prepare_single_objects(objects_img_folder, background_img_path):
+def prepare_single_objects(objects_img_folder, background_img_path, threshold=30):
     background_img = cv2.imread(background_img_path, cv2.IMREAD_UNCHANGED)
     output_folder = os.path.join(objects_img_folder, 'extracted')
     os.makedirs(output_folder, exist_ok=True)
 
     for path in [img for img in os.listdir(objects_img_folder) if img.endswith('.png') or img.endswith('.jpg') or img.endswith('.jpeg')]:
         img = cv2.imread(os.path.join(objects_img_folder, path), cv2.IMREAD_UNCHANGED)
-        extracted = extract_object_from_background(img, background_img)
+        extracted = extract_object_from_background(img, background_img, threshold)
         print(f"Extracted object saved as {os.path.join(output_folder, path.split('.')[0] + '.png')}")
         cv2.imwrite(os.path.join(output_folder, path.split('.')[0] + '.png'), extracted, [cv2.IMWRITE_PNG_COMPRESSION, 9])
     
@@ -351,16 +359,16 @@ def prepare_single_objects(objects_img_folder, background_img_path):
 #     background_img_path="data/background.jpg"
 # )
 
-generate_yolo_dataset(
-    output_dir="datasets",
-    num_images=100,
-    train_img_folder="data/objects/extracted",
-    # val_img_folder="data/bustine/all/CVAT_validation",
-    background_folder="data",
-    classes={
-        'F': 'front',
-        'B': 'back',
-        'W': 'white'
-    }
-)
+# generate_yolo_dataset(
+#     output_dir="datasets",
+#     num_images=100,
+#     train_img_folder="data/objects/extracted",
+#     # val_img_folder="data/bustine/all/CVAT_validation",
+#     background_folder="data",
+#     classes={
+#         'F': 'front',
+#         'B': 'back',
+#         'W': 'white'
+#     }
+# )
 

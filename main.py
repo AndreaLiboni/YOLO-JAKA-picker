@@ -14,6 +14,7 @@ from PyQt5.QtCore import QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QFont
 
 from yolo import YOLOModel
+from dataset_generation import prepare_single_objects, generate_yolo_dataset
 
 
 class ClickableLabel(QLabel):
@@ -88,6 +89,7 @@ class CameraApp(QMainWindow):
         self.is_picking = False
         
         self.init_ui()
+        self.create_menu_bar()
         self.init_camera()
 
         try:
@@ -180,9 +182,36 @@ class CameraApp(QMainWindow):
         self.points_list = QListWidget()
         self.points_list.setMaximumHeight(300)
         
+        # YOLO Dataset controls
+        yolo_dataset_layout = QVBoxLayout()
+        yolo_dataset_layout.addWidget(QLabel("YOLO Dataset Generation"))
+
+        self.btn_capture_bg = QPushButton("Capture Background")
+        self.btn_capture_bg.clicked.connect(self.capture_background)
+
+        object_capture_layout = QHBoxLayout()
+        self.combo_classes = QComboBox()
+        self.combo_classes.addItems(self.classes)
+        self.btn_capture_obj = QPushButton("Capture Object")
+        self.btn_capture_obj.clicked.connect(self.capture_object)
+        object_capture_layout.addWidget(self.combo_classes)
+        object_capture_layout.addWidget(self.btn_capture_obj)
+
+        self.btn_prepare_objs = QPushButton("Prepare Objects")
+        self.btn_prepare_objs.clicked.connect(self.prepare_objects)
+
+        self.btn_generate_ds = QPushButton("Generate Dataset")
+        self.btn_generate_ds.clicked.connect(self.generate_dataset)
+
+        yolo_dataset_layout.addWidget(self.btn_capture_bg)
+        yolo_dataset_layout.addLayout(object_capture_layout)
+        yolo_dataset_layout.addWidget(self.btn_prepare_objs)
+        yolo_dataset_layout.addWidget(self.btn_generate_ds)
+
         # Add all controls to layout
         controls_layout.addLayout(calib_button_layout)
         controls_layout.addLayout(picking_button_layout)
+        controls_layout.addLayout(yolo_dataset_layout)
         controls_layout.addWidget(self.undistort_checkbox)
         controls_layout.addWidget(self.crop_checkbox)
         controls_layout.addWidget(self.lock_charuco_checkbox)
@@ -673,11 +702,7 @@ class CameraApp(QMainWindow):
     
     def toggle_detection(self, checked):
         if checked and self.yolo is None:
-            self.yolo = YOLOModel(
-                model_path=self.CONFIGS['model']['model_path'],
-                device=self.CONFIGS['model']['device'],
-                conf_thres=self.CONFIGS['model']['confidence_threshold'],
-            )
+            self.yolo = self._get_yolo_model()
         elif not checked:
             self.yolo = None
             self.points_detection.clear()
@@ -790,7 +815,27 @@ class CameraApp(QMainWindow):
         object_height = self.CONFIGS['jaka']['object_height']
         pick_force = self.CONFIGS['jaka']['pick_force']
         digital_output_index = self.CONFIGS['jaka']['digital_output_index']
-        drop_positions = self.CONFIGS['jaka']['drop_positions']
+
+        drop_positions = None
+        if self.CONFIGS['jaka']['drop_class']:
+            drop_positions = []
+            for cl in self.CONFIGS['jaka']['drop_class']:
+                position = None
+                for obj in obj_points:
+                    if obj[2] == cl:
+                        position = self.CONFIGS['jaka']['drop_positions'][cl]
+                        break
+                if position is not None:
+                    drop_positions.append(position)
+                else:
+                    QMessageBox.warning(self, "Configuration Error", f"No drop position defined for class {cl}")
+                    return
+        else:
+            drop_positions = self.CONFIGS['jaka']['drop_positions']
+        
+        if drop_positions is None or len(drop_positions) == 0:
+            return
+
         
         robot = RC(
             self.CONFIGS['jaka']['ip_address']
@@ -898,6 +943,145 @@ class CameraApp(QMainWindow):
         robot.motion_abort()
         robot.logout()
 
+    def capture_background(self):
+        if self.current_frame is not None:
+            os.makedirs('data', exist_ok=True)
+            cv2.imwrite('data/background.jpg', self.current_frame)
+            QMessageBox.information(self, "Success", "Background captured safely as data/background.jpg")
+
+    def capture_object(self):
+        if self.current_frame is not None:
+            cls_name = self.combo_classes.currentText()
+            objects_dir = 'data/objects'
+            os.makedirs(objects_dir, exist_ok=True)
+            
+            # Find next index
+            existing = [f for f in os.listdir(objects_dir) if f.startswith(f"class-{cls_name}_")]
+            indices = [int(f.split('_')[1].split('.')[0]) for f in existing if '_' in f]
+            next_idx = max(indices) + 1 if indices else 1
+            
+            filename = f"class-{cls_name}_{next_idx}.jpg"
+            path = os.path.join(objects_dir, filename)
+            cv2.imwrite(path, self.current_frame)
+            QMessageBox.information(self, "Success", f"Object saved as {path}")
+
+    def prepare_objects(self):
+        try:
+            self.statusBar().showMessage("Preparing objects...")
+            prepare_single_objects("data/objects", "data/background.jpg", self.CONFIGS.get('dataset', {}).get('threshold', 30))
+            QMessageBox.information(self, "Success", "Objects prepared successfully in data/objects/extracted")
+            self.statusBar().showMessage("Objects prepared.", 5000)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to prepare objects: {str(e)}")
+    
+    def generate_dataset(self):
+        self.statusBar().showMessage("Generating YOLO Dataset...")
+        class_dict = {str(k): v for k, v in enumerate(self.classes)}
+        ds_cfg = self.CONFIGS.get('dataset', {})
+        generate_yolo_dataset(
+            output_dir=ds_cfg.get('output_dir', "datasets"),
+            num_images=ds_cfg.get('num_images', 100),
+            train_img_folder="data/objects/extracted",
+            background_folder="data",
+            classes=class_dict,
+            images_per_background=ds_cfg.get('images_per_background', [1, 2, 3, 4, 5, 8, 10]),
+            img_dim=ds_cfg.get('img_dim', 1.0),
+            brightness_variation=ds_cfg.get('brightness_variation', 0.0)
+        )
+        QMessageBox.information(self, "Success", f"YOLO dataset generated successfully in '{ds_cfg.get('output_dir', 'datasets')}/'")
+        self.statusBar().showMessage("YOLO Dataset generated.", 5000)
+        # except Exception as e:
+        #     QMessageBox.critical(self, "Error", f"Failed to generate dataset: {str(e)}")
+
+    def create_menu_bar(self):
+        menubar = self.menuBar()
+        yolo_menu = menubar.addMenu('YOLO Model')
+
+        train_action = QAction('Train Model', self)
+        train_action.triggered.connect(self.yolo_train)
+        yolo_menu.addAction(train_action)
+
+        test_action = QAction('Test Model', self)
+        test_action.triggered.connect(self.yolo_test)
+        yolo_menu.addAction(test_action)
+
+        show_dataset_action = QAction('Show Dataset', self)
+        show_dataset_action.triggered.connect(self.yolo_show_dataset)
+        yolo_menu.addAction(show_dataset_action)
+
+        plot_results_action = QAction('Plot Results', self)
+        plot_results_action.triggered.connect(self.yolo_plot_results)
+        yolo_menu.addAction(plot_results_action)
+
+        evaluate_forward_action = QAction('Evaluate Forward', self)
+        evaluate_forward_action.triggered.connect(self.yolo_evaluate_forward)
+        yolo_menu.addAction(evaluate_forward_action)
+
+    def _get_yolo_model(self):
+        if self.yolo is None:
+            model_config = self.CONFIGS.get('model', {})
+            self.yolo = YOLOModel(
+                model_path=model_config.get('model_path', 'best.pt'),
+                device=model_config.get('device', 'cuda:0'),
+                conf_thres=model_config.get('confidence_threshold', 0.9),
+                data_file=model_config.get('data', {}).get('yaml_file', "./datasets/data.yaml"),
+                output_dir=model_config.get('data', {}).get('output_folder', "./yolo_output")
+            )
+        return self.yolo
+
+    def yolo_train(self):
+        model_config = self.CONFIGS.get('model', {})
+        epochs = model_config.get('train', {}).get('epochs', 100)
+        img_size = model_config.get('train', {}).get('img_size') or 640
+        self.statusBar().showMessage("Starting YOLO Training...")
+        try:
+            self._get_yolo_model().train(epochs=epochs, imgsz=img_size)
+            QMessageBox.information(self, "Success", "Training completed.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Training failed: {str(e)}")
+        finally:
+            self.statusBar().showMessage("Training finished.", 5000)
+
+    def yolo_test(self):
+        self.statusBar().showMessage("Starting YOLO Testing...")
+        try:
+            results = self._get_yolo_model().test()
+            QMessageBox.information(self, "Success", "Testing completed. Check console/output for metrics.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Testing failed: {str(e)}")
+        finally:
+            self.statusBar().showMessage("Testing finished.", 5000)
+
+    def yolo_show_dataset(self):
+        self.statusBar().showMessage("Generating Dataset visualizations...")
+        try:
+            self._get_yolo_model().show_dataset()
+            QMessageBox.information(self, "Success", "Dataset visualizations generated in output folder.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Show Dataset failed: {str(e)}")
+        finally:
+            self.statusBar().showMessage("Show Dataset visualizations finished.", 5000)
+
+    def yolo_plot_results(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select results.csv", "", "CSV Files (*.csv);;All Files (*)")
+        if file_path:
+            try:
+                self._get_yolo_model().plot_result(file_path)
+                QMessageBox.information(self, "Success", "Results plotted successfully.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Plotting failed: {str(e)}")
+
+    def yolo_evaluate_forward(self):
+        text, ok = QInputDialog.getText(self, "Evaluate Forward", "Enter split ('train', 'val', 'test') or file/dir path:")
+        if ok and text:
+            self.statusBar().showMessage(f"Evaluating forward on {text}...")
+            try:
+                self._get_yolo_model().evaluate_forward(text)
+                QMessageBox.information(self, "Success", "Forward evaluation completed.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Forward evaluation failed: {str(e)}")
+            finally:
+                self.statusBar().showMessage("Forward evaluation finished.", 5000)
 
 
 def main():
