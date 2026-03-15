@@ -1,10 +1,10 @@
 # yolo config
 model:
-  model_path: 'runs/detect/train/weights/best.pt'
+  model_path: 'runs/detect/train2/weights/best.pt'
   # model_path: './yolo11n.pt'
-  classes: ['front', 'back', 'white', 'transparent', 'box']
+  classes: ['front', 'back', 'white', 'transparent', 'box-blue', 'box-red', 'box-green', 'box-brown']
   device: 'cuda:0' # 'cpu' or 'cuda:0'
-  confidence_threshold: 0.8
+  confidence_threshold: 0.75
   data:
     yaml_file: "./datasets/data.yaml"
     output_folder: "./yolo_output"
@@ -17,7 +17,7 @@ jaka:
   ip_address: '192.168.0.75'
   start_pose: [-1.57, 1.57, -1.57, 1.57, -4.71, 0] # joints
   # start_pose: [0.0, 1.57, -1.57, 0.0, -1.57, 0.0]
-  speed: 300 # mm/s ONLY FOR LINEAR MOVEMENT
+  speed: 800 # mm/s ONLY FOR LINEAR MOVEMENT
   coordinate_system_index: 8
   tcp_index: 10
   tcp_rotation_xy: [0, 3.14159] # rad
@@ -29,7 +29,7 @@ jaka:
     [520, 274, 78, 0, 3.14159, 3.14159],
     [520, 0, 78, 0, 3.14159, 3.14159]
   ]
-  drop_class: ['box', 'box', 'box', 'box'] # class to drop at each position, one for each position
+  drop_class: ['box-blue', 'box-red', 'box-green', 'box-brown'] # class to drop at each position, one for each position
 
 # camera config
 camera:
@@ -46,4 +46,4 @@ dataset:
   img_dim: 1.0
   brightness_variation: 0.0
   threshold: 20
-  always_present_classes: ['box']
+  always_present_classes: ['box-blue', 'box-red', 'box-green', 'box-brown']

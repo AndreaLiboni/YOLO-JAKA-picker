@@ -81,6 +81,7 @@ def place_images_on_background(background_size, num_images, image_folder, output
     images_to_place = []
     
     # Add always present classes first
+    num_images += len(always_present_classes)
     for ap_class in always_present_classes:
         class_images = [img for img in images if img[6:].split('_')[0] == ap_class]
         if class_images:
@@ -89,6 +90,7 @@ def place_images_on_background(background_size, num_images, image_folder, output
             print(f"Warning: No images found for always present class {ap_class}")
             
     # Fill up to num_images
+    images = [img for img in images if img not in images_to_place]
     while len(images_to_place) < num_images:
         choice = random.choice(images)
         if choice[6:].split('_')[0] in always_present_classes:

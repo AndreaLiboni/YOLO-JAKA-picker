@@ -493,7 +493,8 @@ class CameraApp(QMainWindow):
                         self.points_detection.append((real_x, real_y, cl))
 
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        cv2.putText(frame, f'{self.classes[cl]} dist: {dist}mm ({real_x}, {real_y})', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (36,255,12), 2)
+                        #cv2.putText(frame, f'{self.classes[cl]} dist: {dist}mm ({real_x}, {real_y})', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (36,255,12), 2)
+                        cv2.putText(frame, f'{self.classes[cl]}', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (36,255,12), 2)
 
                 display_frame = frame.copy()
                 
@@ -816,25 +817,17 @@ class CameraApp(QMainWindow):
         pick_force = self.CONFIGS['jaka']['pick_force']
         digital_output_index = self.CONFIGS['jaka']['digital_output_index']
 
-        # drop_positions = None
-        # if 'drop_class' in self.CONFIGS['jaka'] and self.CONFIGS['jaka']['drop_class']:
-        #     drop_positions = []
-        #     for cl in self.CONFIGS['jaka']['drop_class']:
-        #         position = None
-        #         for obj in obj_points:
-        #             print(obj[2])
-        #             if self.classes[obj[2]] == cl:
-        #                 position = self.CONFIGS['jaka']['drop_positions'][cl]
-        #                 break
-        #         if position is not None:
-        #             drop_positions.append(position)
-        #         elif cl != 'box':
-        #             QMessageBox.warning(self, "Configuration Error", f"No drop position defined for class {cl}")
-        #             return
-        # else:
-        #     drop_positions = self.CONFIGS['jaka']['drop_positions']
-
-        drop_positions = [(obj[1], obj[0], 150, 0, 3.14159, 0) for obj in obj_points if obj[2] == 4]        
+        drop_positions = None
+        if 'drop_class' in self.CONFIGS['jaka'] and self.CONFIGS['jaka']['drop_class']:
+            # drop_positions = [(obj[1], obj[0], 50, 0, 3.14159, 0) for obj in obj_points if self.classes[obj[2]] in self.CONFIGS['jaka']['drop_class']]
+            drop_positions = [None]*len(self.CONFIGS['jaka']['drop_class'])
+            for i, obj in enumerate(obj_points):
+                if self.classes[obj[2]] in self.CONFIGS['jaka']['drop_class']:
+                    index = self.CONFIGS['jaka']['drop_class'].index(self.classes[obj[2]])
+                    drop_positions[index] = (obj[1], obj[0], 50, 0, 3.14159, 0)
+        else:
+            drop_positions = self.CONFIGS['jaka']['drop_positions']
+     
         if drop_positions is None or len(drop_positions) == 0:
             return
 
@@ -896,12 +889,12 @@ class CameraApp(QMainWindow):
         time_start_cycle = time.time()
         Z = object_height
         for x,y, cl in obj_points:
-            if cl == 4:
+            if self.classes[cl] in self.CONFIGS['jaka']['drop_class']:
                 continue
             target_pos = [
                 y,
                 x,
-                150,
+                50,
                 rot_x,
                 rot_y,
                 0
@@ -915,7 +908,7 @@ class CameraApp(QMainWindow):
 
             max_force = 0
             offset_z = object_height + 3
-            robot.zero_end_sensor()
+            # robot.zero_end_sensor()
             # Move down to pick
             speed_collision = 40
             robot.linear_move([0,0, -offset_z, 0, 0, 0], 1, False, speed_collision)
@@ -938,15 +931,16 @@ class CameraApp(QMainWindow):
             print("Picked object with force: ", max_force)
             robot.set_digital_output(0, digital_output_index, 1)
 
-            robot.linear_move([0,0, 150, 0, 0, 0], 1, True, speed)
+            robot.linear_move([0,0, 50, 0, 0, 0], 1, True, speed)
 
-            drop_position = drop_positions[0]
+            drop_position = drop_positions[cl]
             robot.linear_move(drop_position, 0, True, speed)
 
             robot.set_digital_output(0, digital_output_index, 0)
 
-            time.sleep(0.5)
+            time.sleep(0.3)
 
+        robot.linear_move([0,0, 150, 0, 0, 0], 1, True, speed)
         robot.motion_abort()
         robot.logout()
         print("Cycle time: ", time.time() - time_start_cycle)
