@@ -1,9 +1,12 @@
 venv
 __pycache__/
 calibration_images/
+_calibration_images/
 calibration.json
 *.pt
 data
+_data
 datasets
 yolo_output
 runs
+

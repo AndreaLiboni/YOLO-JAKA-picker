@@ -1,9 +1,10 @@
 # yolo config
 model:
   model_path: 'runs/detect/train/weights/best.pt'
-  classes: ['front', 'back', 'white', 'box']
+  # model_path: './yolo11n.pt'
+  classes: ['front', 'back', 'white', 'transparent', 'box']
   device: 'cuda:0' # 'cpu' or 'cuda:0'
-  confidence_threshold: 0.9
+  confidence_threshold: 0.8
   data:
     yaml_file: "./datasets/data.yaml"
     output_folder: "./yolo_output"
@@ -16,11 +17,11 @@ jaka:
   ip_address: '192.168.0.75'
   start_pose: [-1.57, 1.57, -1.57, 1.57, -4.71, 0] # joints
   # start_pose: [0.0, 1.57, -1.57, 0.0, -1.57, 0.0]
-  speed: 200 # mm/s ONLY FOR LINEAR MOVEMENT
+  speed: 300 # mm/s ONLY FOR LINEAR MOVEMENT
   coordinate_system_index: 8
-  tcp_index: 9
+  tcp_index: 10
   tcp_rotation_xy: [0, 3.14159] # rad
-  object_height: 10 # mm
+  object_height: 5 # mm
   pick_force: 1 # N
   digital_output_index: 7
   drop_positions: [ # in the charuko coordinate system, one for each class
@@ -28,20 +29,21 @@ jaka:
     [520, 274, 78, 0, 3.14159, 3.14159],
     [520, 0, 78, 0, 3.14159, 3.14159]
   ]
-  drop_class: ['box', 'box', 'box'] # class to drop at each position, one for each position
+  drop_class: ['box', 'box', 'box', 'box'] # class to drop at each position, one for each position
 
 # camera config
 camera:
   index: 2
-  work_area_size: [450, 600] # mm
+  work_area_size: [450, 550] # mm
   focus: null # min: 0, max: 255, increment:5 -> null to enable auto
-  exposure: null  # min:0, max: 232 -> null to enable auto
+  exposure: 50  # min:0, max: 232 -> null to enable auto
 
 # dataset generation config
 dataset:
   output_dir: 'datasets'
   num_images: 100
-  images_per_background: [1, 2, 3, 4, 5, 8, 10]
+  images_per_background: [3, 4, 5, 8]
   img_dim: 1.0
   brightness_variation: 0.0
-  threshold: 30
+  threshold: 20
+  always_present_classes: ['box']

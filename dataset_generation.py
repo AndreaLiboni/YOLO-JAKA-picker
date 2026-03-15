@@ -62,7 +62,7 @@ def is_overlapping(new_box, existing_boxes, threshold=0.25):
     return False
 
 
-def place_images_on_background(background_size, num_images, image_folder, output_image, output_labels, background, classes, img_dim=0.1, brightness_variation=0):
+def place_images_on_background(background_size, num_images, image_folder, output_image, output_labels, background, classes, img_dim=0.1, brightness_variation=0, always_present_classes=[]):
     # open background image and resize it
     background_img = Image.open(background)
     background = background_img.resize(background_size)
@@ -77,8 +77,25 @@ def place_images_on_background(background_size, num_images, image_folder, output
     placed_boxes = []
     target_height = int(background_size[1] * img_dim)
     
-    for _ in range(num_images):
-        img_name = random.choice(images)
+    # List of images to place
+    images_to_place = []
+    
+    # Add always present classes first
+    for ap_class in always_present_classes:
+        class_images = [img for img in images if img[6:].split('_')[0] == ap_class]
+        if class_images:
+            images_to_place.append(random.choice(class_images))
+        else:
+            print(f"Warning: No images found for always present class {ap_class}")
+            
+    # Fill up to num_images
+    while len(images_to_place) < num_images:
+        choice = random.choice(images)
+        if choice[6:].split('_')[0] in always_present_classes:
+            continue
+        images_to_place.append(choice)
+        
+    for img_name in images_to_place:
         img_path = os.path.join(image_folder, img_name)
         # CLASS
         class_name = img_name[6:].split('_')[0]
@@ -216,7 +233,7 @@ def parse_cvat_annotations(cvat_root, classes):
             ])
     return images
 
-def generate_yolo_dataset(output_dir, num_images, train_img_folder, background_folder, classes, val_img_folder=None, images_per_background=[1, 2, 3, 4, 5, 8, 10], img_dim=1.0, brightness_variation=0.0):
+def generate_yolo_dataset(output_dir, num_images, train_img_folder, background_folder, classes, val_img_folder=None, images_per_background=[1, 2, 3, 4, 5, 8, 10], img_dim=1.0, brightness_variation=0.0, always_present_classes=[]):
     os.makedirs(output_dir, exist_ok=True)
     images_dir = os.path.join(output_dir, "images")
     labels_dir = os.path.join(output_dir, "labels")
@@ -254,6 +271,7 @@ def generate_yolo_dataset(output_dir, num_images, train_img_folder, background_f
             classes=classes,
             output_labels=os.path.join(labels_dir, subset, label_filename),
             brightness_variation=brightness_variation,
+            always_present_classes=always_present_classes,
         )
     
     # if validation folder is provided, parse CVAT annotations
@@ -297,6 +315,7 @@ def generate_yolo_dataset(output_dir, num_images, train_img_folder, background_f
                     classes=classes,
                     output_labels=os.path.join(labels_dir, subset, label_filename),
                     brightness_variation=brightness_variation,
+                    always_present_classes=always_present_classes,
                 )
     
     # Create the data.yaml file

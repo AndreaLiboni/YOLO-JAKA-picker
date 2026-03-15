@@ -816,23 +816,25 @@ class CameraApp(QMainWindow):
         pick_force = self.CONFIGS['jaka']['pick_force']
         digital_output_index = self.CONFIGS['jaka']['digital_output_index']
 
-        drop_positions = None
-        if self.CONFIGS['jaka']['drop_class']:
-            drop_positions = []
-            for cl in self.CONFIGS['jaka']['drop_class']:
-                position = None
-                for obj in obj_points:
-                    if obj[2] == cl:
-                        position = self.CONFIGS['jaka']['drop_positions'][cl]
-                        break
-                if position is not None:
-                    drop_positions.append(position)
-                else:
-                    QMessageBox.warning(self, "Configuration Error", f"No drop position defined for class {cl}")
-                    return
-        else:
-            drop_positions = self.CONFIGS['jaka']['drop_positions']
-        
+        # drop_positions = None
+        # if 'drop_class' in self.CONFIGS['jaka'] and self.CONFIGS['jaka']['drop_class']:
+        #     drop_positions = []
+        #     for cl in self.CONFIGS['jaka']['drop_class']:
+        #         position = None
+        #         for obj in obj_points:
+        #             print(obj[2])
+        #             if self.classes[obj[2]] == cl:
+        #                 position = self.CONFIGS['jaka']['drop_positions'][cl]
+        #                 break
+        #         if position is not None:
+        #             drop_positions.append(position)
+        #         elif cl != 'box':
+        #             QMessageBox.warning(self, "Configuration Error", f"No drop position defined for class {cl}")
+        #             return
+        # else:
+        #     drop_positions = self.CONFIGS['jaka']['drop_positions']
+
+        drop_positions = [(obj[1], obj[0], 150, 0, 3.14159, 0) for obj in obj_points if obj[2] == 4]        
         if drop_positions is None or len(drop_positions) == 0:
             return
 
@@ -891,27 +893,32 @@ class CameraApp(QMainWindow):
         #     return
         
 
+        time_start_cycle = time.time()
         Z = object_height
         for x,y, cl in obj_points:
+            if cl == 4:
+                continue
             target_pos = [
                 y,
                 x,
-                Z,
+                150,
                 rot_x,
                 rot_y,
-                3.14
+                0
             ]
             print(f"Moving to point: x={x} mm, y={y} mm")
             if not self.is_picking:
                 break
             res = robot.linear_move(target_pos, 0, True, speed)
+            res = robot.linear_move([y, x, Z, rot_x, rot_y, 0], 0, True, speed)
 
 
             max_force = 0
             offset_z = object_height + 3
             robot.zero_end_sensor()
             # Move down to pick
-            robot.linear_move([0,0, -offset_z, 0, 0, 0], 1, False, 20)
+            speed_collision = 40
+            robot.linear_move([0,0, -offset_z, 0, 0, 0], 1, False, speed_collision)
             start_time = time.time()
             while True:
                 force = abs(robot.get_torque_sensor_data(1)[1][2][2])
@@ -922,7 +929,7 @@ class CameraApp(QMainWindow):
                     break
                 current_time = time.time()
                 if current_time - start_time > 5:
-                    robot.linear_move([0,0, -offset_z, 0, 0, 0], 1, False, 20)
+                    robot.linear_move([0,0, -offset_z, 0, 0, 0], 1, False, speed_collision)
                     print("Timeout reached while picking, aborting.")
                     start_time = current_time
                 
@@ -931,26 +938,49 @@ class CameraApp(QMainWindow):
             print("Picked object with force: ", max_force)
             robot.set_digital_output(0, digital_output_index, 1)
 
-            robot.linear_move([0,0, offset_z, 0, 0, 0], 1, True, 20)
+            robot.linear_move([0,0, 150, 0, 0, 0], 1, True, speed)
 
-            drop_position = drop_positions[cl]
+            drop_position = drop_positions[0]
             robot.linear_move(drop_position, 0, True, speed)
 
             robot.set_digital_output(0, digital_output_index, 0)
 
-            time.sleep(1.5)
+            time.sleep(0.5)
 
         robot.motion_abort()
         robot.logout()
+        print("Cycle time: ", time.time() - time_start_cycle)
 
     def capture_background(self):
         if self.current_frame is not None:
+            frame_to_save = self.current_frame.copy()
+            if self.show_cropped and self.is_calibrated and hasattr(self, 'rvec') and self.rvec is not None:
+                try:
+                    cropped, _ = self.rectify_perspective(frame_to_save, output_width=self.interactive_label.width())
+                    frame_to_save = cropped
+                except Exception as e:
+                    QMessageBox.warning(self, "Crop Error", f"Failed to crop background: {str(e)}")
+            elif not self.show_cropped:
+                pass
+            else:
+                QMessageBox.warning(self, "Crop Warning", "Background not cropped: Calibration not found or pose estimation missing.")
+
             os.makedirs('data', exist_ok=True)
-            cv2.imwrite('data/background.jpg', self.current_frame)
-            QMessageBox.information(self, "Success", "Background captured safely as data/background.jpg")
+            cv2.imwrite('data/background.jpg', frame_to_save)
+            QMessageBox.information(self, "Success", "Background captured as data/background.jpg")
 
     def capture_object(self):
         if self.current_frame is not None:
+            frame_to_save = self.current_frame.copy()
+            if self.is_calibrated and hasattr(self, 'rvec') and self.rvec is not None:
+                try:
+                    cropped, _ = self.rectify_perspective(frame_to_save, output_width=self.interactive_label.width())
+                    frame_to_save = cropped
+                except Exception as e:
+                    QMessageBox.warning(self, "Crop Error", f"Failed to crop object image: {str(e)}")
+            else:
+                QMessageBox.warning(self, "Crop Warning", "Object image not cropped: Calibration not found or pose estimation missing.")
+
             cls_name = self.combo_classes.currentText()
             objects_dir = 'data/objects'
             os.makedirs(objects_dir, exist_ok=True)
@@ -962,7 +992,7 @@ class CameraApp(QMainWindow):
             
             filename = f"class-{cls_name}_{next_idx}.jpg"
             path = os.path.join(objects_dir, filename)
-            cv2.imwrite(path, self.current_frame)
+            cv2.imwrite(path, frame_to_save)
             QMessageBox.information(self, "Success", f"Object saved as {path}")
 
     def prepare_objects(self):
@@ -986,7 +1016,8 @@ class CameraApp(QMainWindow):
             classes=class_dict,
             images_per_background=ds_cfg.get('images_per_background', [1, 2, 3, 4, 5, 8, 10]),
             img_dim=ds_cfg.get('img_dim', 1.0),
-            brightness_variation=ds_cfg.get('brightness_variation', 0.0)
+            brightness_variation=ds_cfg.get('brightness_variation', 0.0),
+            always_present_classes=ds_cfg.get('always_present_classes', [])
         )
         QMessageBox.information(self, "Success", f"YOLO dataset generated successfully in '{ds_cfg.get('output_dir', 'datasets')}/'")
         self.statusBar().showMessage("YOLO Dataset generated.", 5000)
